@@ -54,3 +54,42 @@ class InfluencerProfile(db.Model):
         self.category = category        
         self.niche = niche
         self.reach = reach
+
+class Campaign(db.Model):
+    __tablename__ = 'campaigns'
+    id = db.Column(db.Integer, primary_key=True)
+    sponsor_id = db.Column(db.Integer, db.ForeignKey('sponsor_profiles.id'), nullable=False)
+    name = db.Column(db.String(100), nullable=False)
+    description = db.Column(db.Text )
+    goals = db.Column(db.Integer)
+    start_date = db.Column(db.Date)
+    end_date = db.Column(db.Date)
+    visibility = db.Column(db.String(10), nullable=False) # public or private
+    budget = db.Column(db.Float, nullable=False)
+    
+    sponsor_profile = db.relationship('SponsorProfile', backref = 'campaigns')
+    ad_requests = db.relationship('AdRequests', back_populates = 'campaign', cascade="all, delete-orphan")
+
+class AdRequests(db.Model):
+    __tablename__ = 'ad_requests'
+    id = db.Column(db.Integer, primary_key=True)
+    campaign_id = db.Column(db.Integer, db.ForeignKey('campaigns.id'), nullable=False)
+    influencer_id = db.Column(db.Integer, db.ForeignKey('influencer_profiles.id'), nullable=False) 
+    requirements = db.Column(db.Text)
+    sent_by = db.Column(db.String(100), nullable=False)
+    payment_amount = db.Column(db.float, nullable=False)
+    status = db.Column(db.String(20), nullable=False)
+
+    campaign = db.relationship('Campaign', back_populates = 'ad_requests')
+    influencer = db.relationship('InfluencerProfile', backref = 'ad_requests')
+    
+class Negotiations(db.Model):
+    __tablename__ = 'negotiations'
+    id = db.Column(db.Integer, primary_key=True)
+    ad_request_id = db.Column(db.Integer, db.ForeignKey('ad_requests.id'), nullable=False)
+    time = db.Column(db.DateTime, nullable=False)
+    temporary_payment_amount = db.Column(db.Float, nullable=False)
+    message = db.Column(db.Text)
+    sent_by = db.Column(db.String(100), nullable=False)
+    
+    ad_request = db.relationship('AdRequests', backref = 'negotiations')

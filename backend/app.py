@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 from models import *
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity, unset_jwt_cookies
+from datetime import datetime
 
 app = Flask(__name__)
 
@@ -165,6 +166,182 @@ def logout():
     response = jsonify({"message": "Logout successful"})
     unset_jwt_cookies(response)
     return response, 200
+
+# CRUD on Campaigns
+# CREATE
+@app.route('/campaign', methods=['POST'])
+@jwt_required()
+def create_campaign():
+    current_user = get_jwt_identity()
+    if current_user['role'] != 'sponsor':
+        return jsonify({"error": "You must be a sponsor to create campaigns"}), 401
+    
+    sponsor = SponsorProfile.query.filter_by(user_id=current_user['id']).first()
+
+    data = request.get_json()
+    sponsor_id = sponsor.id
+    name = data['name']
+    description = data['description']
+    goals = data['goals']
+    start_date = data['start_date']
+    end_date = data['end_date']
+    visibility = data['visibility']
+    budget = data['budget']
+    
+    if not name or not visibility or not budget:
+        return jsonify({"error":'Please fill in all the required fields'}), 400
+    
+    if budget < 0:
+        return jsonify({"error":'Budget cannot be negative'}), 400
+
+    new_campaign = Campaign(sponsor_id=sponsor_id,
+                            name=name,
+                            description=description,
+                            goals=goals,
+                            start_date=datetime.strptime(start_date, '%Y-%m-%d').date(),
+                            end_date=datetime.strptime(end_date, '%Y-%m-%d').date(),
+                            visibility=visibility,
+                            budget=budget)
+    
+    try:
+        db.session.add(new_campaign)
+        db.session.commit()
+    except Exception as e:
+        return jsonify({"error":f'Something went wrong: {str(e)}'}), 500
+
+    return jsonify({"message":'Campaign created successfully'}), 200
+
+# UPDATE # SPONSOR who created the campaign
+@app.route('/campaign/<int:campaign_id>', methods=['PUT'])
+@jwt_required()
+def update_campaign(campaign_id):
+    current_user = get_jwt_identity()
+    if current_user['role'] != 'sponsor':
+        return jsonify({"error": "You must be a sponsor to update campaigns"}), 401
+    
+    sponsor = SponsorProfile.query.filter_by(user_id=current_user['id']).first()
+
+    campaign = Campaign.query.filter_by(id=campaign_id).first()
+
+    if not campaign:
+        return jsonify({"error": "Campaign not found"}), 404
+    
+    if campaign.sponsor_id != sponsor.id:
+        return jsonify({"error": "You do not have permission to update this campaign"}), 403
+
+    data = request.get_json()
+    
+    if not data['name'] or not data['visibility'] or not data['budget']:
+        return jsonify({"error":'Please fill in all the required fields'}), 400
+
+    campaign.name = data['name']
+    campaign.description = data['description']
+    campaign.goals = data['goals']
+    campaign.start_date = datetime.strptime(data['start_date'], '%Y-%m-%d').date()
+    campaign.end_date = datetime.strptime(data['end_date'], '%Y-%m-%d').date()
+    campaign.visibility = data['visibility']
+    campaign.budget = data['budget']
+    try:
+        db.session.commit()
+    except Exception as e:
+        return jsonify({"error":f'Something went wrong: {str(e)}'}), 500
+
+    return jsonify({"message":'Campaign updated successfully'}), 200
+
+# READ A SPECIFIC CAMPAIGN BY ID
+@app.route('/campaign/<int:campaign_id>', methods=['GET'])
+def get_campaign(campaign_id):
+    campaign = Campaign.query.filter_by(id=campaign_id).first()
+    if not campaign:
+        return jsonify({"error": "Campaign not found"}), 404
+
+    campaign_data = {
+        "id": campaign.id,
+        "sponsor_id": campaign.sponsor_id,
+        "sponsor": campaign.sponsor_profile.company_name,
+        "name": campaign.name,
+        "description": campaign.description,
+        "goals": campaign.goals,
+        "start_date": datetime.strftime(campaign.start_date, '%Y-%m-%d'), # Convert datetime to string in 'YYYY-MM-DD' format
+        "end_date":datetime.strftime(campaign.end_date, '%Y-%m-%d'),
+        "visibility": campaign.visibility,
+        "budget": campaign.budget
+    }
+    return jsonify(campaign_data), 200
+
+# READ ALL CAMPAIGNS
+@app.route('/public-campaigns', methods=['GET'])
+def get_public_campaigns():
+    campaigns = Campaign.query.filter_by(visibility='public').all()
+
+    campaign_data = []
+    for campaign in campaigns:
+        campaign_data.append({
+            "id": campaign.id,
+            "sponsor_id": campaign.sponsor_id,
+            "sponsor": campaign.sponsor_profile.company_name,
+            "name": campaign.name,
+            "description": campaign.description,
+            "goals": campaign.goals,
+            "start_date": datetime.strftime(campaign.start_date, '%Y-%m-%d'), # Convert datetime to string in 'YYYY-MM-DD' format
+            "end_date":datetime.strftime(campaign.end_date, '%Y-%m-%d'),
+            "visibility": campaign.visibility,
+            "budget": campaign.budget
+        })
+
+    return jsonify(campaign_data), 200
+
+@app.route('/my-campaigns', methods=['GET'])
+@jwt_required()
+def get_my_campaigns():
+    current_user = get_jwt_identity()
+    if current_user['role'] != 'sponsor':
+        return jsonify({"error": "You must be a sponsor to view your campaigns"}), 401
+
+    sponsor = SponsorProfile.query.filter_by(user_id=current_user['id']).first()
+    campaigns = Campaign.query.filter_by(sponsor_id=sponsor.id).all()
+
+    campaign_data = []
+    for campaign in campaigns:
+        campaign_data.append({
+            "id": campaign.id,
+            "sponsor_id": campaign.sponsor_id,
+            "sponsor": campaign.sponsor_profile.company_name,
+            "name": campaign.name,
+            "description": campaign.description,
+            "goals": campaign.goals,
+            "start_date": datetime.strftime(campaign.start_date, '%Y-%m-%d'), # Convert datetime to string in 'YYYY-MM-DD' format
+            "end_date":datetime.strftime(campaign.end_date, '%Y-%m-%d'),
+            "visibility": campaign.visibility,
+            "budget": campaign.budget
+        })
+
+    return jsonify(campaign_data), 200
+
+@app.route('/campaign/<int:campaign_id>', methods=['DELETE'])
+@jwt_required()
+def delete_campaign(campaign_id):
+    current_user = get_jwt_identity()
+    if not (current_user['role'] == 'sponsor' or current_user['role'] == 'admin'):
+        return jsonify({"error": "You must be a sponsor or admin to delete campaigns"}), 401
+    
+    campaign = Campaign.query.filter_by(id=campaign_id).first()
+
+    if not campaign:
+        return jsonify({"error": "Campaign not found"}), 404
+
+    if current_user['role'] == 'sponsor':    
+        sponsor = SponsorProfile.query.filter_by(user_id=current_user['id']).first()
+        if campaign.sponsor_id != sponsor.id:
+            return jsonify({"error": "You do not have permission to delete this campaign"}), 403
+
+    try:
+        db.session.delete(campaign)
+        db.session.commit()
+    except Exception as e:
+        return jsonify({"error":f'Something went wrong: {str(e)}'}), 500
+
+    return jsonify({"message":'Campaign deleted successfully'}), 200
 
 if __name__ == '__main__':
     app.run(debug=True)
