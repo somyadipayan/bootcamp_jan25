@@ -5,6 +5,8 @@ import LoginPage from '@/views/LoginPage.vue'
 import CreateCampaign from '@/views/CreateCampaign.vue'
 import EditCampiagn from '@/views/EditCampiagn.vue'
 import MyCampaigns from '@/views/MyCampaigns.vue'
+import InfluencerDashboard from '@/views/InfluencerDashboard.vue'
+import NegotiationPage from '@/views/NegotiationPage.vue'
 
 const routes = [
   {
@@ -44,6 +46,16 @@ const routes = [
     path: '/my-campaigns',
     name: 'mycampaigns',
     component: MyCampaigns
+  },
+  {
+    path: '/influencer-dashboard',
+    name: 'influencedashboard',
+    component: InfluencerDashboard
+  },
+  {
+    path: '/negotiation/:id',
+    name: 'NegotiationPage',
+    component: NegotiationPage
   }
 ]
 

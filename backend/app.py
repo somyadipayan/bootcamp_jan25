@@ -270,7 +270,7 @@ def get_campaign(campaign_id):
     return jsonify(campaign_data), 200
 
 # READ ALL CAMPAIGNS
-@app.route('/public-campaigns', methods=['GET'])
+@app.route('/public_campaigns', methods=['GET'])
 def get_public_campaigns():
     campaigns = Campaign.query.filter_by(visibility='public').all()
 
@@ -423,7 +423,7 @@ def get_influencer_ad_requests():
     return jsonify(ad_requests_data), 200
 
 # Influencer send ad request to sponsor
-@app.route('/influencer/send-ad-request', methods=['POST'])
+@app.route('/influencer/send_ad_request', methods=['POST'])
 @jwt_required()
 def send_influencer_ad_request():
     current_user = get_jwt_identity()
@@ -440,7 +440,7 @@ def send_influencer_ad_request():
         influencer_id = influencer.id,
         requirements = data['requirements'],
         sent_by = 'influencer',
-        payment_amount = data['payment_amount'],
+        payment_amount = data['paymentAmount'],
         status = 'Pending'
     )
     db.session.add(ad_request)
@@ -473,6 +473,95 @@ def get_sponsor_ad_requests():
         })
 
     return jsonify(ad_requests_data), 200
+
+@app.route('/accept_ad_request', methods=['PUT'])
+@jwt_required()
+def accept_ad_request():
+    current_user = get_jwt_identity()
+    if current_user['role'] not in ['sponsor', 'influencer']:
+        return jsonify({"error": "You must be a sponsor or influencer to accept ad requests"}), 401
+
+    data = request.get_json()
+    ad_request = AdRequests.query.get_or_404(data['ad_request_id'])
+
+    ad_request.status = 'Accepted'
+    ad_request.campaign.budget -= ad_request.payment_amount
+
+    db.session.commit()
+    return jsonify({"message":'Ad request accepted successfully'}), 200
+
+@app.route('/reject_ad_request', methods=['PUT'])
+@jwt_required()
+def reject_ad_request():
+    current_user = get_jwt_identity()
+    if current_user['role'] not in ['sponsor', 'influencer']:
+        return jsonify({"error": "You must be a sponsor or influencer to accept ad requests"}), 401
+
+    data = request.get_json()
+    ad_request = AdRequests.query.get_or_404(data['ad_request_id'])
+
+    db.session.delete(ad_request)
+    db.session.commit()
+    return jsonify({"message":'Ad request rejected successfully'}), 200
+
+# Get Negotiation Details for a specific ad request
+@app.route('/negotiation/<int:ad_request_id>', methods=['GET'])
+@jwt_required()
+def get_negotiation_details(ad_request_id):
+    current_user = get_jwt_identity()
+    print(current_user)
+    if current_user['role'] not in ['sponsor', 'influencer']:
+        return jsonify({"error": "You must be a sponsor or influencer to see negotiation details"}), 401
+
+    negotiations = Negotiations.query.filter_by(ad_request_id=ad_request_id).all()
+    ad_request = AdRequests.query.get_or_404(ad_request_id)
+
+    messages = []
+    for negotiation in negotiations:
+        messages.append({
+            "time": negotiation.time,
+            "message": negotiation.message,
+            "sent_by": negotiation.sent_by,
+            "temporary_payment_amount": negotiation.temporary_payment_amount
+        })
+
+
+    return jsonify({
+        "messages": messages,
+        "adRequest": {
+            "id": ad_request.id,
+            "campaign_id": ad_request.campaign_id,
+            "name": ad_request.campaign.name,
+            "visibility": ad_request.campaign.visibility,
+            "original_payment_amount": ad_request.payment_amount,
+            "status": ad_request.status,
+            "influencer_id": ad_request.influencer_id,
+            "influencer": ad_request.influencer.name,
+            "sponsor_id": ad_request.campaign.sponsor_id,
+            "sponsor": ad_request.campaign.sponsor_profile.company_name
+        }
+    }), 200
+
+@app.route('/negotiation', methods=['POST'])
+@jwt_required()
+def add_negotiation():
+    current_user = get_jwt_identity()
+    print(current_user)
+    if current_user['role'] not in ['sponsor', 'influencer']:
+        return jsonify({"error": "You must be a sponsor or influencer to add a negotiation"}), 401
+
+    data = request.get_json()
+    print(data)
+    negotiation = Negotiations(
+        ad_request_id = data['ad_request_id'],
+        time = datetime.now(),
+        temporary_payment_amount = data['temporary_payment_amount'],
+        message = data['message'],
+        sent_by = current_user['role']
+    )
+    db.session.add(negotiation)
+    db.session.commit()
+    return jsonify({"message":'Negotiation added successfully'}), 200
 
 if __name__ == '__main__':
     app.run(debug=True)
