@@ -318,6 +318,30 @@ def get_my_campaigns():
 
     return jsonify(campaign_data), 200
 
+@app.route('/all_influencers', methods=['GET'])
+def get_all_influencers():
+    influencers = InfluencerProfile.query.all()
+    if not influencers:
+        return jsonify({"error": "No influencers found"}), 404
+
+    influencers_data = []
+    for influencer in influencers:
+        # Get ads for the influencer which are accepted
+        influencer_Ads = AdRequests.query.filter_by(influencer_id=influencer.id).filter_by(status='accepted').all()
+        previous_collaborations = []
+        for ad in influencer_Ads:
+            previous_collaborations.append(ad.campaign.sponsor_profile.company_name)
+        influencers_data.append({
+            "id": influencer.id,
+            "name": influencer.name,
+            "category": influencer.category,
+            "niche": influencer.niche,
+            "reach": influencer.reach,
+            "previous_collaborations": previous_collaborations
+        })
+
+    return jsonify(influencers_data), 200
+
 @app.route('/campaign/<int:campaign_id>', methods=['DELETE'])
 @jwt_required()
 def delete_campaign(campaign_id):
@@ -342,6 +366,113 @@ def delete_campaign(campaign_id):
         return jsonify({"error":f'Something went wrong: {str(e)}'}), 500
 
     return jsonify({"message":'Campaign deleted successfully'}), 200
+
+# Sponsor sends request to influencer (private campaigns)
+@app.route('/sponsor/send-ad-request', methods=['POST'])
+@jwt_required()
+def send_ad_request():
+    current_user = get_jwt_identity()
+    if current_user['role'] != 'sponsor':
+        return jsonify({"error": "You must be a sponsor to send ad requests"}), 401
+
+    sponsor = SponsorProfile.query.filter_by(user_id=current_user['id']).first()
+
+    data = request.get_json()
+    campaign = Campaign.query.get_or_404(data['campaignId'])
+    
+    if campaign.sponsor_id != sponsor.id:
+        return jsonify({"error": "You do not have permission to send ad requests for this campaign"}), 403
+
+    ad_request = AdRequests(
+        campaign_id = campaign.id,
+        influencer_id = data['influencerId'],
+        requirements = data['requirements'],
+        sent_by = 'sponsor',
+        payment_amount = data['paymentAmount'],
+        status = 'Pending'
+    )
+    db.session.add(ad_request)
+    db.session.commit()
+    return jsonify({"message":'Ad request sent successfully'}), 200
+
+# Influencer sees all the ad requests for him
+@app.route('/influencer/ad-requests', methods=['GET'])
+@jwt_required()
+def get_influencer_ad_requests():
+    current_user = get_jwt_identity()
+    if current_user['role'] != 'influencer':
+        return jsonify({"error": "You must be an influencer to see ad requests"}), 401
+
+    influencer = InfluencerProfile.query.filter_by(user_id=current_user['id']).first()
+
+    ad_requests = AdRequests.query.filter_by(influencer_id=influencer.id).all()
+    ad_requests_data = []
+    for ad_request in ad_requests:
+        ad_requests_data.append({
+            "id": ad_request.id,
+            "campaign_id": ad_request.campaign_id,
+            "sponsor_id": ad_request.campaign.sponsor_id,
+            "sponsor": ad_request.campaign.sponsor_profile.company_name,
+            "name": ad_request.campaign.name,
+            "requirements": ad_request.requirements,
+            "sent_by": ad_request.sent_by,
+            "payment_amount": ad_request.payment_amount,
+            "status": ad_request.status
+        })
+
+    return jsonify(ad_requests_data), 200
+
+# Influencer send ad request to sponsor
+@app.route('/influencer/send-ad-request', methods=['POST'])
+@jwt_required()
+def send_influencer_ad_request():
+    current_user = get_jwt_identity()
+    if current_user['role'] != 'influencer':
+        return jsonify({"error": "You must be an influencer to send ad requests"}), 401
+
+    influencer = InfluencerProfile.query.filter_by(user_id=current_user['id']).first()
+
+    data = request.get_json()
+    campaign = Campaign.query.get_or_404(data['campaign_id'])
+
+    ad_request = AdRequests(
+        campaign_id = campaign.id,
+        influencer_id = influencer.id,
+        requirements = data['requirements'],
+        sent_by = 'influencer',
+        payment_amount = data['payment_amount'],
+        status = 'Pending'
+    )
+    db.session.add(ad_request)
+    db.session.commit()
+    return jsonify({"message":'Ad request sent successfully'}), 200
+
+# Sponsor sees all the ad requests for him
+@app.route('/sponsor/ad-requests', methods=['GET'])
+@jwt_required()
+def get_sponsor_ad_requests():
+    current_user = get_jwt_identity()
+    if current_user['role'] != 'sponsor':
+        return jsonify({"error": "You must be a sponsor to see ad requests"}), 401
+
+    sponsor = SponsorProfile.query.filter_by(user_id=current_user['id']).first()
+
+    ad_requests = AdRequests.query.join(Campaign).filter(Campaign.sponsor_id == sponsor.id).all()
+    ad_requests_data = []
+    for ad_request in ad_requests:
+        ad_requests_data.append({
+            "id": ad_request.id,
+            "campaign_id": ad_request.campaign_id,
+            "name": ad_request.campaign.name,
+            "requirements": ad_request.requirements,
+            "sent_by": ad_request.sent_by,
+            "payment_amount": ad_request.payment_amount,
+            "status": ad_request.status,
+            "influencer_id": ad_request.influencer_id,
+            "influencer": ad_request.influencer.name
+        })
+
+    return jsonify(ad_requests_data), 200
 
 if __name__ == '__main__':
     app.run(debug=True)

@@ -105,7 +105,7 @@ export default {
             const data = await response.json()
             if(response.ok) {
                 alert(data.message)
-                this.$router.push('/about')
+                this.$router.push('/login')
             }
             else{
                 alert(data.error)

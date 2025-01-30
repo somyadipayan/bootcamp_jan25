@@ -77,8 +77,8 @@ class AdRequests(db.Model):
     influencer_id = db.Column(db.Integer, db.ForeignKey('influencer_profiles.id'), nullable=False) 
     requirements = db.Column(db.Text)
     sent_by = db.Column(db.String(100), nullable=False)
-    payment_amount = db.Column(db.float, nullable=False)
-    status = db.Column(db.String(20), nullable=False)
+    payment_amount = db.Column(db.Float, nullable=False)
+    status = db.Column(db.String(20), nullable=False) # Pending, Accepted, Declined
 
     campaign = db.relationship('Campaign', back_populates = 'ad_requests')
     influencer = db.relationship('InfluencerProfile', backref = 'ad_requests')
