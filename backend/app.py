@@ -1,19 +1,41 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file, Response
 from models import *
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity, unset_jwt_cookies
 from datetime import datetime
+import workers, task
+from mailer import mail
+from io import BytesIO, StringIO
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+from flask_caching import Cache
 
 app = Flask(__name__)
 
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///iescp.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['JWT_SECRET_KEY'] = 'super-secret'
+app.config['MAIL_SERVER'] = 'localhost'
+app.config['MAIL_PORT'] = 1025
+app.config['CACHE_TYPE'] = 'redis'
+app.config['CACHE_REDIS_URL'] = 'redis://localhost:6379/0'
 
 db.init_app(app)
 bcrypt.init_app(app)
 jwt = JWTManager(app)
 CORS(app, supports_credentials=True)
+mail.init_app(app)
+cache = Cache(app)
+celery = workers.celery
+
+celery.conf.update(
+    broker_url='redis://localhost:6379/1',
+    result_backend='redis://localhost:6379/2'
+)
+
+celery.Task = workers.ContextTask
+app.app_context().push()
 
 def create_admin():
     admin = User.query.filter_by(role='admin').first()
@@ -33,6 +55,7 @@ with app.app_context():
 
 @app.route('/')
 def hello_world():
+    task.add.delay(1,4)
     return 'Hello, World!'
 
 @app.route('/register', methods=['POST'])
@@ -447,7 +470,7 @@ def send_influencer_ad_request():
     db.session.commit()
     return jsonify({"message":'Ad request sent successfully'}), 200
 
-# Sponsor sees all the ad requests for him
+# all the ad requests for him
 @app.route('/sponsor/ad-requests', methods=['GET'])
 @jwt_required()
 def get_sponsor_ad_requests():
@@ -538,8 +561,10 @@ def get_negotiation_details(ad_request_id):
             "influencer_id": ad_request.influencer_id,
             "influencer": ad_request.influencer.name,
             "sponsor_id": ad_request.campaign.sponsor_id,
-            "sponsor": ad_request.campaign.sponsor_profile.company_name
-        }
+            "sponsor": ad_request.campaign.sponsor_profile.company_name,
+            "paymentAmount": ad_request.payment_amount
+        },
+       
     }), 200
 
 @app.route('/negotiation', methods=['POST'])
@@ -562,6 +587,167 @@ def add_negotiation():
     db.session.add(negotiation)
     db.session.commit()
     return jsonify({"message":'Negotiation added successfully'}), 200
+
+@app.route("/adrequest/finalize", methods=['POST'])
+@jwt_required()
+def finalize_ad_request():
+    current_user = get_jwt_identity()
+    if current_user['role'] not in ['sponsor', 'influencer']:
+        return jsonify({"error": "You must be a sponsor or influencer to finalize ad requests"}), 401
+    data = request.get_json()
+    ad_request = AdRequests.query.get_or_404(data['ad_request_id'])
+
+    # GET THE LATEST NEGOTIATION FROM THE AD REQUEST
+    if current_user['role'] == 'sponsor':
+        negotiations = Negotiations.query.filter_by(ad_request_id=ad_request.id).filter_by(sent_by='influencer').order_by(Negotiations.time.desc()).first()
+    else:
+        negotiations = Negotiations.query.filter_by(ad_request_id=ad_request.id).filter_by(sent_by='sponsor').order_by(Negotiations.time.desc()).first()
+
+    if not negotiations:
+        return jsonify({"error": "No negotiations found for this ad request"}), 404
+   
+    ad_request.payment_amount = negotiations.temporary_payment_amount
+    ad_request.status = 'Accepted'
+    db.session.commit()
+    return jsonify({"message":'Ad request Accepteds successfully'}), 200
+
+
+
+@app.route('/admin/statistics', methods=['GET'])
+@cache.cached(timeout=180)
+# @jwt_required()
+def get_statistics():
+    """ Returns a JSON of counts of sponsor, influencers and campaigns for admin """
+    # current_user = get_jwt_identity()
+    # if current_user['role'] != 'admin':
+    #     return jsonify({"error": "You must be an admin to view statistics"}), 401
+
+    total_users = User.query.count()
+    total_sponsors = SponsorProfile.query.count()
+    total_influencers = InfluencerProfile.query.count()
+    total_campaigns = Campaign.query.count()
+    total_ad_requests = AdRequests.query.count()
+
+    stats = {
+        "total_users": total_users,
+        "total_sponsors": total_sponsors,
+        "total_influencers": total_influencers,
+        "total_campaigns": total_campaigns,
+        "total_ad_requests": total_ad_requests
+    }
+
+    return jsonify(stats), 200
+
+@cache.cached(timeout=60)
+@app.route('/admin/statistics/graph', methods=['GET'])
+@jwt_required()
+def get_statistics_graph():
+    """ Returns a pie chart of count of sponsor and influencers for admin """
+    current_user = get_jwt_identity()
+    if current_user['role'] != 'admin':
+        return jsonify({"error": "You must be an admin to view statistics"}), 401
+
+    try:
+        labels = ['Sponsors', 'Influencers']
+        count = [SponsorProfile.query.count(), InfluencerProfile.query.count()]
+        
+        fig, ax = plt.subplots()
+        ax.pie(count, labels=labels, autopct='%1.1f%%')
+        ax.axis('equal')
+
+        img = BytesIO()
+        plt.savefig(img, format='png')
+        img.seek(0)
+        plt.close()
+
+        return send_file(img, mimetype='image/png')
+    except Exception as e:
+        return jsonify({"error": f"Failed to generate graph: {str(e)}"}), 500
+
+import csv
+@app.route('/sponsor/csv', methods=['GET'])
+@jwt_required()
+def get_sponsor_csv():
+    """
+    Returns a CSV file containing all campaign details for a sponsor
+    """
+    current_user = get_jwt_identity()
+    if current_user['role'] != 'sponsor':
+        return jsonify({"error": "You must be a sponsor to view campaign details"}), 401
+
+    sponsor = SponsorProfile.query.filter_by(user_id=current_user['id']).first()
+    campaigns = Campaign.query.filter_by(sponsor_id=sponsor.id).all()
+
+    csv_buffer = StringIO()
+    csv_writer = csv.writer(csv_buffer)
+    csv_writer.writerow(['Campaign ID', 'Name', 'Description', 'Goals', 'Start Date', 'End Date', 'Visibility', 'Budget'])
+
+    for campaign in campaigns:
+        csv_writer.writerow([campaign.id, campaign.name, campaign.description, campaign.goals, campaign.start_date, campaign.end_date, campaign.visibility, campaign.budget])
+
+    response = Response(csv_buffer.getvalue(), content_type='text/csv')
+    response.headers['Content-Disposition'] = 'attachment; filename="sponsor-campaigns.csv"'
+
+    return response
+
+# Clear Cache
+@app.route('/clear-cache', methods=['POST'])
+def clear_cache():
+    cache.clear()
+    return jsonify({"message": "Cache cleared successfully"}), 200
+
+# flag a campaign as spam
+# @app.route('/campaign/<int:campaign_id>/spam', methods=['POST'])
+# @jwt_required()
+# def flag_campaign_as_spam(campaign_id):
+#     current_user = get_jwt_identity()
+#     if current_user['role'] != 'admin':
+#         return jsonify({"error": "You must be an admin to flag campaigns as spam"}), 401
+
+#     campaign = Campaign.query.filter_by(id=campaign_id).first()
+#     if not campaign:
+#         return jsonify({"error": "Campaign not found"}), 404
+
+#     campaign.flag = True
+#     db.session.commit()
+#     return jsonify({"message":'Campaign marked as spam successfully'}), 200
+
+# flag users as spam
+# @app.route('/user/<int:user_id>/spam', methods=['POST'])
+# @jwt_required()
+# def flag_user_as_spam(user_id):
+#     current_user = get_jwt_identity()
+#     if current_user['role'] != 'admin':
+#         return jsonify({"error": "You must be an admin to flag users as spam"}), 401
+
+#     user = User.query.filter_by(id=user_id).first()
+#     if not user:
+#         return jsonify({"error": "User not found"}), 404
+
+#     user.flag = True
+#     db.session.commit()
+#     return jsonify({"message":'User marked as spam successfully'}), 200
+
+# get active users (NOT FLAGGED AS SPAM)
+# @app.route('/users', methods=['GET'])
+# @jwt_required()
+# def get_active_users():
+#     current_user = get_jwt_identity()
+#     if current_user['role'] != 'admin':
+#         return jsonify({"error": "You must be an admin to view active users"}), 401
+#     users = User.query.filter_by(flag=False).all()
+#     users_data = []
+
+#     for user in users:
+#         user_data = {
+#             'id': user.id,
+#             'username': user.username,
+#             'email': user.email,
+#             'role': user.role
+#         }
+#         users_data.append(user_data)
+
+#     return jsonify({"users": users_data}), 200
 
 if __name__ == '__main__':
     app.run(debug=True)

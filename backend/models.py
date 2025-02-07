@@ -12,6 +12,7 @@ class User(db.Model):
     email = db.Column(db.String(120), unique=True ,nullable=False)
     password = db.Column(db.String(80), nullable=False)
     role = db.Column(db.String(20), nullable=False) # sponsor or influencer or admin
+    # flag = db.Column(db.Boolean, nullable=False, default=False)
 
     def __init__(self, username, email, password, role):
         self.username = username
@@ -66,6 +67,7 @@ class Campaign(db.Model):
     end_date = db.Column(db.Date)
     visibility = db.Column(db.String(10), nullable=False) # public or private
     budget = db.Column(db.Float, nullable=False)
+    #flag = db.Column(db.Boolean, nullable=False, default=False)
     
     sponsor_profile = db.relationship('SponsorProfile', backref = 'campaigns')
     ad_requests = db.relationship('AdRequests', back_populates = 'campaign', cascade="all, delete-orphan")

@@ -41,6 +41,8 @@
                         </div>
                         <div v-else>
                             <button class="btn btn-dark me-2" disabled>Request Sent</button>
+                            <button class="btn btn-warning"
+                                @click="negotiate(request.id)">Negotiate</button>
                         </div>
                         </div>
                         <div v-else>
@@ -80,29 +82,6 @@
                 </div>
             </div>
         </div>
-
-        <!-- Negotiate Payment Modal -->
-        <!-- <div class="modal fade" id="negotiateModal" tabindex="-1" aria-labelledby="negotiateModalLabel"
-            aria-hidden="true">
-            <div class="modal-dialog">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h5 class="modal-title" id="negotiateModalLabel">Negotiate Payment Amount</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                    </div>
-                    <div class="modal-body">
-                        <form @submit.prevent="negotiatePayment">
-                            <div class="mb-3">
-                                <label for="negotiatedAmount" class="form-label">New Payment Amount</label>
-                                <input v-model="negotiationForm.newPaymentAmount" type="number" class="form-control"
-                                    id="negotiatedAmount" required>
-                            </div>
-                            <button type="submit" class="btn btn-warning">Submit</button>
-                        </form>
-                    </div>
-                </div>
-            </div> 
-        </div>-->
     </div>
 </template>
 
@@ -122,10 +101,7 @@ export default {
                 requirements: '',
                 paymentAmount: '',
             },
-            // negotiationForm: {
-            //     requestId: null,
-            //     newPaymentAmount: '',
-            // },
+    
             searchQuery: '', // Added for search functionality
             filteredCampaigns: [], // To store filtered campaigns
         };
@@ -209,12 +185,7 @@ export default {
                 paymentAmount: '',
             };
         },
-        // openNegotiateModal(requestId, currentPaymentAmount) {
-        //     this.negotiationForm.requestId = requestId;
-        //     this.negotiationForm.newPaymentAmount = currentPaymentAmount;
-        //     const negotiateModal = new bootstrap.Modal(document.getElementById('negotiateModal'));
-        //     negotiateModal.show();
-        // },
+
         // Method to accept an ad request
         acceptRequest(requestId) {
             fetch('http://localhost:5000/accept_ad_request', {
@@ -260,34 +231,6 @@ export default {
                 })
                 .catch(error => console.error('Error rejecting ad request:', error));
         },
-
-        // // Method to negotiate a payment amount for an ad request
-        // negotiatePayment() {
-        //     fetch('http://localhost:5000/negotiate_ad_request', {
-        //         method: 'PUT',
-        //         headers: {
-        //             'Content-Type': 'application/json',
-        //             'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        //         },
-        //         body: JSON.stringify({
-        //             ad_request_id: this.negotiationForm.requestId,
-        //             paymentAmount: this.negotiationForm.newPaymentAmount,
-        //         }),
-        //     })
-        //         .then(response => {
-        //             if (response.ok) {
-        //                 alert('Ad request negotiated successfully');
-        //                 this.fetchAdRequests(); // Refresh the ad requests list
-        //                 const negotiateModal = bootstrap.Modal.getInstance(document.getElementById('negotiateModal'));
-        //                 negotiateModal.hide();
-        //             } else {
-        //                 return response.json().then(data => {
-        //                     alert(data.message || 'Failed to negotiate payment');
-        //                 });
-        //             }
-        //         })
-        //         .catch(error => console.error('Error negotiating payment:', error));
-        // },
         negotiate(id){
             this.$router.push({ name: 'NegotiationPage', params: { id: id } });
         }

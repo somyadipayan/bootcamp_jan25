@@ -56,6 +56,11 @@ const routes = [
     path: '/negotiation/:id',
     name: 'NegotiationPage',
     component: NegotiationPage
+  },
+  {
+    path: '/admin-dashboard',
+    name: 'admindashboard',
+    component: () => import(/* webpackChunkName: "about" */ '../views/AdminDashboard.vue')
   }
 ]
 
